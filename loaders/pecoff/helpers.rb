@@ -57,4 +57,11 @@ module BinaryIO
         str = self.read(8)
         LE.qword(str[0], str[1], str[2], str[3], str[4], str[5], str[6], str[7])
     end
+
+    def read_rva_size
+        rva = self.read_dword
+        size = self.read_dword
+
+        return rva, size
+    end
 end
