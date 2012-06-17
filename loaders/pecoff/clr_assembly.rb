@@ -65,6 +65,139 @@ class StreamHeader
     attr_accessor :offset, :size, :name
 end
 
+class StringsHeap
+    def StringsHeap.read(f, len)
+        heap = StringsHeap.new
+
+        # read whole heap at once
+        data = f.read(len)
+
+        # data now contains "ASCII-8BIT" string data.  it's really 
+        # NUL-terminated UTF-8. so convert it and then split on \0.
+        data.force_encoding(Encoding::UTF_8)
+        heap.strings = data.split("\0")
+
+        heap
+    end
+
+    def initialize
+        self.strings = []
+    end
+
+    attr_accessor :strings
+end
+
+class SquiggleStream
+    class TableVector < Flags
+        enum_attr :module,                  (1 << 0x00)
+        enum_attr :type_ref,                (1 << 0x01)
+        enum_attr :type_def,                (1 << 0x02)
+        enum_attr :field,                   (1 << 0x04)
+        enum_attr :method_def,              (1 << 0x06)
+        enum_attr :param,                   (1 << 0x08)
+        enum_attr :interface_impl,          (1 << 0x09)
+        enum_attr :member_ref,              (1 << 0x0a)
+        enum_attr :constant,                (1 << 0x0b)
+        enum_attr :custom_attribute,        (1 << 0x0c)
+        enum_attr :field_marshal,           (1 << 0x0d)
+        enum_attr :decl_security,           (1 << 0x0e)
+        enum_attr :class_layout,            (1 << 0x0f)
+        enum_attr :field_layout,            (1 << 0x10)
+        enum_attr :stand_alone_sig,         (1 << 0x11)
+        enum_attr :event_map,               (1 << 0x12)
+        enum_attr :event,                   (1 << 0x14)
+        enum_attr :property_map,            (1 << 0x15)
+        enum_attr :property,                (1 << 0x17)
+        enum_attr :method_semantics,        (1 << 0x18)
+        enum_attr :method_impl,             (1 << 0x19)
+        enum_attr :module_ref,              (1 << 0x1a)
+        enum_attr :type_spec,               (1 << 0x1b)
+        enum_attr :impl_map,                (1 << 0x1c)
+        enum_attr :field_rva,               (1 << 0x1d)
+        enum_attr :assembly,                (1 << 0x20)
+        enum_attr :assembly_processor,      (1 << 0x21)
+        enum_attr :assembly_os,             (1 << 0x22)
+        enum_attr :assembly_ref,            (1 << 0x23)
+        enum_attr :assembly_ref_processor,  (1 << 0x24)
+        enum_attr :assembly_ref_os,         (1 << 0x25)
+        enum_attr :file,                    (1 << 0x26)
+        enum_attr :exported_type,           (1 << 0x27)
+        enum_attr :manifest_resource,       (1 << 0x28)
+        enum_attr :nested_class,            (1 << 0x29)
+        enum_attr :generic_param,           (1 << 0x2a)
+        enum_attr :method_spec,             (1 << 0x2b)
+        enum_attr :generic_param_constraint,(1 << 0x2c)
+    end
+
+    def SquiggleStream.read(f, len)
+        f.extend BinaryIO
+        stream = SquiggleStream.new
+
+        stream.reserved_0 = f.read_dword
+        stream.major_version = f.read_byte
+        stream.minor_version = f.read_byte
+        stream.heap_sizes = f.read_byte
+        stream.reserved_7 = f.read_byte
+        stream.valid = TableVector.new(f.read_qword)
+        stream.sorted = TableVector.new(f.read_qword)
+
+        return stream
+    end
+
+    attr_accessor :reserved_0, :major_version, :minor_version, :heap_sizes,
+        :reserved_7, :valid, :sorted, :rows, :tables
+end
+
+class BlobHeap
+    def BlobHeap.read(f, len)
+        heap = BlobHeap.new
+
+        # read whole heap at once
+        data = f.read(len)
+        ofs = 0
+        idx = 0
+
+        loop do
+            blob_len = nil
+
+            case data[ofs].ord
+            when (0..0x7f)
+                # 0xxx_xxxxb: length is encoded in lower seven bits
+                blob_len = data[ofs].ord & 0x7f
+                ofs += 1
+            when (0x80..0xbf)
+                # 10xx_xxxxb: length is encoded in lower six bits + next byte
+                blob_len = ((data[ofs].ord & 0x3f) << 8) + data[ofs + 1].ord
+                ofs += 2
+            when (0xc0..0xdf)
+                # 110x_xxxxb: length is encoded in lower five bits + next three bytes
+                blob_len = ((data[ofs].ord & 0x1f) << 24) + 
+                    (data[ofs + 1].ord << 16) + (data[ofs + 2].ord << 8) +
+                    data[ofs + 3].ord
+                ofs += 4
+            else
+                raise "invalid length encoding"
+            end
+
+            heap.blobs[idx] = data[ofs...(ofs + blob_len)]
+            ofs += blob_len
+            idx += 1
+
+            if (ofs >= len) then
+                break
+            end
+        end
+
+        heap
+    end
+
+    def initialize
+        self.blobs = []
+    end
+
+    attr_accessor :blobs
+end
+
 class MetadataRoot
     def MetadataRoot.read(f)
         f.extend BinaryIO
@@ -120,10 +253,38 @@ class Assembly
         asm.cli_header = CLIHeader.read(f)
 
         # read metadata root
-        f.pos = exe.rva_to_offset(asm.cli_header.metadata[0])
+        mdroot_ofs = f.pos = exe.rva_to_offset(asm.cli_header.metadata[0])
         asm.metadata_root = MetadataRoot.read(f)
 
-        return asm
+        # read strings heap
+        strings_stream = (asm.metadata_root.stream_headers.select do |stream| 
+            stream.name =~ /^#Strings/
+        end)[0]
+        f.pos = mdroot_ofs + strings_stream.offset
+        asm.strings_heap = StringsHeap.read(f, strings_stream.size) 
+
+        # read US heap
+        us_stream = (asm.metadata_root.stream_headers.select do |stream| 
+            stream.name =~ /^#US/
+        end)[0]
+        f.pos = mdroot_ofs + us_stream.offset
+        asm.us_heap = BlobHeap.read(f, us_stream.size)
+
+        # read blob heap
+        blob_stream = (asm.metadata_root.stream_headers.select do |stream| 
+            stream.name =~ /^#Blob/
+        end)[0]
+        f.pos = mdroot_ofs + blob_stream.offset
+        asm.blob_heap = BlobHeap.read(f, blob_stream.size)
+
+        # read squiggle stream
+        squiggle = (asm.metadata_root.stream_headers.select do |stream| 
+            stream.name =~ /^#~/
+        end)[0]
+        f.pos = mdroot_ofs + squiggle.offset
+        asm.squiggle_stream = SquiggleStream.read(f, squiggle.size)
+
+        return asm 
     end
 
     def initialize(image)
@@ -133,6 +294,11 @@ class Assembly
     attr_accessor :pecoff_image
     attr_accessor :cli_header
     attr_accessor :metadata_root
+
+    attr_accessor :strings_heap
+    attr_accessor :us_heap
+    attr_accessor :blob_heap
+    attr_accessor :squiggle_stream
 end
 
 end
