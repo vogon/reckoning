@@ -3,6 +3,9 @@ module Labeled
 end
 
 class Expr
+	def variables
+		[]
+	end
 end
 
 def make_var(value)
@@ -35,6 +38,10 @@ class Variable < AExp
 		self.name = name
 	end
 
+	def variables
+		[self.name]
+	end
+
 	attr_accessor :name
 end
 
@@ -60,6 +67,10 @@ class OpA < AExp
 		self.rhs = rhsexp
 	end
 
+	def variables
+		self.lhs.variables | self.rhs.variables
+	end
+
 	attr_accessor :op
 	attr_accessor :lhs, :rhs
 end
@@ -76,6 +87,10 @@ class Not < BExp
 		self.rhs = b
 	end
 
+	def variables
+		self.rhs.variables
+	end
+
 	attr_accessor :rhs
 end
 
@@ -87,6 +102,10 @@ class OpB < BExp
 		self.op = op.to_sym
 		self.lhs = lhs
 		self.rhs = rhs
+	end
+
+	def variables
+		self.lhs.variables | self.rhs.variables
 	end
 
 	attr_accessor :op
@@ -102,8 +121,12 @@ class OpR < BExp
 		(lhsexp && rhsexp) or fail
 
 		self.op = op.to_sym
-		self.lhs = lhs
-		self.rhs = rhs
+		self.lhs = lhsexp
+		self.rhs = rhsexp
+	end
+
+	def variables
+		self.lhs.variables | self.rhs.variables
 	end
 
 	attr_accessor :op
@@ -162,6 +185,10 @@ class Assign < Stmt
 		exit
 	end
 
+	def variables
+		self.lhs.variables | self.rhs.variables
+	end
+
 	attr_accessor :lhs, :rhs
 end
 
@@ -217,6 +244,10 @@ class Seq < Stmt
 		self.first[label] or self.second[label]
 	end
 
+	def variables
+		self.first.variables | self.second.variables
+	end
+
 	attr_accessor :first, :second
 end
 
@@ -246,6 +277,10 @@ class If < Stmt
 
 	def [](label)
 		((label == self.label) ? self : nil) or (self.yes)[label] or (self.no)[label]
+	end
+
+	def variables
+		self.test.variables | self.yes.variables | self.no.variables
 	end
 
 	attr_accessor :test
@@ -278,6 +313,10 @@ class While < Stmt
 
 	def [](label)
 		((label == self.label) ? self : nil) or (self.body)[label]
+	end
+
+	def variables
+		self.test.variables | self.body.variables
 	end
 
 	attr_accessor :test
