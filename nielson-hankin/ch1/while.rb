@@ -211,6 +211,10 @@ class Skip < Stmt
 	def [](label)
 		(label == self.label) ? self : nil
 	end
+
+	def entry
+		self.label
+	end
 end
 
 class Seq < Stmt
@@ -225,15 +229,22 @@ class Seq < Stmt
 		s1 = self.first
 		s2 = self.second
 
-		s1_flows = s1.control_flow(pred, s2.entry)
+		# build the control flow graphs for the individual statements first
+		# (we don't know where the control transfers are yet)
+		s1_flows = s1.control_flow(pred, nil)
+		s2_flows = s2.control_flow(nil, succ)
 
-		s2_flows = []
-		# build flows from each exit of s1 to the entry of s2
-		s1.leaves.each do |label|
-			s2_flows += s2.control_flow(label, succ)
-		end
+		# identify the labels where control leaves S1
+		s1_leaves, s1_inside = s1_flows.partition {|flow| flow[1] == nil}
+		s1_leaves_labels = s1_leaves.map {|flow| flow[0]}
+		# and the labels where control enters S2
+		s2_enters, s2_inside = s2_flows.partition {|flow| flow[0] == nil}
+		s2_enters_labels = s2_enters.map {|flow| flow[1]}
 
-		s1_flows + s2_flows
+		# build control flows from each S1 exit to each S2 entrance
+		control_transfers = s1_leaves_labels.product(s2_enters_labels)
+
+		s1_inside + s2_inside + control_transfers
 	end
 
 	def labels
