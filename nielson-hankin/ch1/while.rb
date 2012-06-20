@@ -3,11 +3,6 @@ module Labeled
 end
 
 class Expr
-	def initialize
-		self.children = []
-	end
-
-	attr_accessor :children
 end
 
 def make_var(value)
@@ -61,10 +56,12 @@ class OpA < AExp
 		(lhsexp && rhsexp) or fail
 
 		self.op = op.to_sym
-		self.children = [lhsexp, rhsexp]
+		self.lhs = lhsexp
+		self.rhs = rhsexp
 	end
 
 	attr_accessor :op
+	attr_accessor :lhs, :rhs
 end
 
 class True < BExp
@@ -76,8 +73,10 @@ end
 class Not < BExp
 	def initialize(b)
 		b.is_a? BExp or fail
-		self.children = [b]
+		self.rhs = b
 	end
+
+	attr_accessor :rhs
 end
 
 class OpB < BExp
@@ -86,10 +85,12 @@ class OpB < BExp
 		((lhs.is_a? BExp) && (rhs.is_a? BExp)) or fail
 
 		self.op = op.to_sym
-		self.children = [lhs, rhs]
+		self.lhs = lhs
+		self.rhs = rhs
 	end
 
 	attr_accessor :op
+	attr_accessor :lhs, :rhs
 end
 
 class OpR < BExp
@@ -101,10 +102,12 @@ class OpR < BExp
 		(lhsexp && rhsexp) or fail
 
 		self.op = op.to_sym
-		self.children = [lhsexp, rhsexp]
+		self.lhs = lhs
+		self.rhs = rhs
 	end
 
 	attr_accessor :op
+	attr_accessor :lhs, :rhs
 end
 
 class Stmt < Expr
@@ -136,7 +139,8 @@ class Assign < Stmt
 		(lhsexp && rhsexp) or fail
 
 		self.label = label
-		self.children = [lhsexp, rhsexp]
+		self.lhs = lhsexp
+		self.rhs = rhsexp
 	end
 
 	def control_flow(pred, succ)
@@ -153,10 +157,12 @@ class Assign < Stmt
 
 	def RD_exit(entry)
 		exit = entry.clone
-		exit[self.children[0].value] = [label]
+		exit[self.lhs.name] = [label]
 
 		exit
 	end
+
+	attr_accessor :lhs, :rhs
 end
 
 class Skip < Stmt
@@ -184,12 +190,13 @@ class Seq < Stmt
 	def initialize(s1, s2)
 		((s1.is_a? Stmt) && (s2.is_a? Stmt)) or fail
 
-		self.children = [s1, s2]
+		self.first = s1
+		self.second = s2
 	end
 
 	def control_flow(pred, succ)
-		s1 = self.children[0]
-		s2 = self.children[1]
+		s1 = self.first
+		s2 = self.second
 
 		s1_flows = s1.control_flow(pred, s2.entry)
 
@@ -203,12 +210,14 @@ class Seq < Stmt
 	end
 
 	def labels
-		self.children[0].labels + self.children[1].labels
+		self.first.labels + self.second.labels
 	end
 
 	def [](label)
-		(self.children[0])[label] or (self.children[1])[label]
+		self.first[label] or self.second[label]
 	end
+
+	attr_accessor :first, :second
 end
 
 class If < Stmt
@@ -219,26 +228,28 @@ class If < Stmt
 		((cond.is_a? BExp) && (yes.is_a? Stmt) && (no.is_a? Stmt)) or fail
 
 		self.label = label
-		self.children = [cond, yes, no]
+		self.test = cond
+		self.yes = yes
+		self.no = no
 	end
 
 	def control_flow(pred, succ)
-		yes = self.children[1]
-		no = self.children[2]
-
-		yes_flows = yes.control_flow(label, succ)
-		no_flows = no.control_flow(label, succ)
+		yes_flows = self.yes.control_flow(label, succ)
+		no_flows = self.no.control_flow(label, succ)
 
 		yes_flows + no_flows
 	end
 
 	def labels
-		self.label + self.children[1].labels + self.children[2].labels
+		self.label + self.yes.labels + self.no.labels
 	end
 
 	def [](label)
-		((label == self.label) ? self : nil) or (self.children[1])[label] or (self.children[2])[label]
+		((label == self.label) ? self : nil) or (self.yes)[label] or (self.no)[label]
 	end
+
+	attr_accessor :test
+	attr_accessor :yes, :no
 end
 
 class While < Stmt
@@ -249,24 +260,28 @@ class While < Stmt
 		((cond.is_a? BExp) && (body.is_a? Stmt)) or fail
 
 		self.label = label
-		self.children = [cond, body]
+		self.test = cond
+		self.body = body
 	end
 
 	def control_flow(pred, succ)
 		entry_flows = [[pred, label]]
 		exit_flows = [[label, succ]]
-		body_flows = self.children[1].control_flow(label, label)
+		body_flows = self.body.control_flow(label, label)
 
 		entry_flows + exit_flows + body_flows
 	end
 
 	def labels
-		[self.label] + self.children[1].labels
+		[self.label] + self.body.labels
 	end
 
 	def [](label)
-		((label == self.label) ? self : nil) or (self.children[1])[label]
+		((label == self.label) ? self : nil) or (self.body)[label]
 	end
+
+	attr_accessor :test
+	attr_accessor :body
 end
 
 def program(stmts)
