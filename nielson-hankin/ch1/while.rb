@@ -1,12 +1,14 @@
-class Node
-	def initialize(value, label)
-		self.value = value
-		self.label = label
+module Labeled
+	attr_accessor :label
+end
 
+class Expr
+	def initialize(value)
+		self.value = value
 		self.children = []
 	end
 
-	attr_accessor :value, :label
+	attr_accessor :value
 	attr_accessor :children
 end
 
@@ -28,22 +30,87 @@ def make_aexp(value)
 	end
 end
 
-class AExp < Node
+class AExp < Expr
 end
 
-class BExp < Node
+class BExp < Expr
 end
 
-class Stmt < Node
+class Variable < AExp
+	def initialize(name)
+		name or fail
+
+		super(name)
+	end
+end
+
+class Numeral < AExp
+	def initialize(value)
+		value or fail
+
+		super(value)
+	end
+end
+
+class OpA < AExp
+	def initialize(op, lhs, rhs)
+		op or fail
+		
+		lhsexp = make_aexp(lhs)
+		rhsexp = make_aexp(rhs)
+		(lhsexp && rhsexp) or fail
+
+		super(op.to_sym)
+		self.children = [lhsexp, rhsexp]
+	end
+end
+
+class True < BExp
+	def initialize
+		super(nil)
+	end
+end
+
+class False < BExp
+	def initialize
+		super(nil)
+	end
+end
+
+class Not < BExp
+	def initialize(b)
+		b.is_a? BExp or fail
+
+		super(nil)
+		self.children = [b]
+	end
+end
+
+class OpB < BExp
+	def initialize(op, lhs, rhs)
+		op or fail
+		((lhs.is_a? BExp) && (rhs.is_a? BExp)) or fail
+
+		super(op.to_sym)
+		self.children = [lhs, rhs]
+	end
+end
+
+class OpR < BExp
+	def initialize(op, lhs, rhs)
+		op or fail
+
+		lhsexp = make_aexp(lhs)
+		rhsexp = make_aexp(rhs)
+		(lhsexp && rhsexp) or fail
+
+		super(op.to_sym)
+		self.children = [lhsexp, rhsexp]
+	end
+end
+
+class Stmt < Expr
 	def control_flow(pred, succ)
-		[]
-	end
-
-	def entry
-		nil
-	end
-
-	def leaves
 		[]
 	end
 
@@ -60,80 +127,9 @@ class Stmt < Node
 	end
 end
 
-class Variable < AExp
-	def initialize(name)
-		name or fail
-
-		super(name, nil)
-	end
-end
-
-class Numeral < AExp
-	def initialize(value)
-		value or fail
-
-		super(value, nil)
-	end
-end
-
-class OpA < AExp
-	def initialize(op, lhs, rhs)
-		op or fail
-		
-		lhsexp = make_aexp(lhs)
-		rhsexp = make_aexp(rhs)
-		(lhsexp && rhsexp) or fail
-
-		super(op.to_sym, nil)
-		self.children = [lhsexp, rhsexp]
-	end
-end
-
-class True < BExp
-	def initialize
-		super(nil, nil)
-	end
-end
-
-class False < BExp
-	def initialize
-		super(nil, nil)
-	end
-end
-
-class Not < BExp
-	def initialize(b)
-		b.is_a? BExp or fail
-
-		super(nil, nil)
-		self.children = [b]
-	end
-end
-
-class OpB < BExp
-	def initialize(op, lhs, rhs)
-		op or fail
-		((lhs.is_a? BExp) && (rhs.is_a? BExp)) or fail
-
-		super(op.to_sym, nil)
-		self.children = [lhs, rhs]
-	end
-end
-
-class OpR < BExp
-	def initialize(op, lhs, rhs)
-		op or fail
-
-		lhsexp = make_aexp(lhs)
-		rhsexp = make_aexp(rhs)
-		(lhsexp && rhsexp) or fail
-
-		super(op.to_sym, nil)
-		self.children = [lhsexp, rhsexp]
-	end
-end
-
 class Assign < Stmt
+	include Labeled
+
 	def initialize(lhs, rhs, label)
 		label or fail
 
@@ -141,7 +137,8 @@ class Assign < Stmt
 		rhsexp = make_aexp(rhs)
 		(lhsexp && rhsexp) or fail
 
-		super(nil, label)
+		super(nil)
+		self.label = label
 		self.children = [lhsexp, rhsexp]
 	end
 
@@ -149,20 +146,12 @@ class Assign < Stmt
 		[[pred, label], [label, succ]]
 	end
 
-	def entry
-		label
-	end
-
-	def leaves
-		[label]
+	def [](label)
+		(label == self.label) ? self : nil
 	end
 
 	def labels
 		[label]
-	end
-
-	def [](label)
-		(label == self.label) ? self : nil
 	end
 
 	def RD_exit(entry)
@@ -174,26 +163,21 @@ class Assign < Stmt
 end
 
 class Skip < Stmt
+	include Labeled
+
 	def initialize(label)
 		label or fail
+		self.label = label
 
-		super(nil, label)
+		super(nil)
 	end
 
 	def control_flow(pred, succ)
 		[[pred, label], [label, succ]]
 	end
 
-	def entry
-		label
-	end
-
-	def leaves
-		[label]
-	end
-
 	def labels
-		[label]
+		[self.label]
 	end
 
 	def [](label)
@@ -205,7 +189,7 @@ class Seq < Stmt
 	def initialize(s1, s2)
 		((s1.is_a? Stmt) && (s2.is_a? Stmt)) or fail
 
-		super(nil, nil)
+		super(nil)
 		self.children = [s1, s2]
 	end
 
@@ -224,14 +208,6 @@ class Seq < Stmt
 		s1_flows + s2_flows
 	end
 
-	def entry
-		self.children[0].entry
-	end
-
-	def leaves
-		self.children[1].leaves
-	end
-
 	def labels
 		self.children[0].labels + self.children[1].labels
 	end
@@ -242,11 +218,15 @@ class Seq < Stmt
 end
 
 class If < Stmt
+	include Labeled
+
 	def initialize(cond, label, yes, no)
 		label or fail
 		((cond.is_a? BExp) && (yes.is_a? Stmt) && (no.is_a? Stmt)) or fail
 
-		super(nil, label)
+		self.label = label
+
+		super(nil)
 		self.children = [cond, yes, no]
 	end
 
@@ -260,14 +240,6 @@ class If < Stmt
 		yes_flows + no_flows
 	end
 
-	def entry
-		self.label
-	end
-
-	def leaves
-		self.children[1].leaves + self.children[2].leaves
-	end
-
 	def labels
 		self.label + self.children[1].labels + self.children[2].labels
 	end
@@ -278,11 +250,15 @@ class If < Stmt
 end
 
 class While < Stmt
+	include Labeled
+
 	def initialize(cond, label, body)
 		label or fail
 		((cond.is_a? BExp) && (body.is_a? Stmt)) or fail
 
-		super(nil, label)
+		self.label = label
+
+		super(nil)
 		self.children = [cond, body]
 	end
 
@@ -292,14 +268,6 @@ class While < Stmt
 		body_flows = self.children[1].control_flow(label, label)
 
 		entry_flows + exit_flows + body_flows
-	end
-
-	def entry
-		self.label
-	end
-
-	def leaves
-		[self.label]
 	end
 
 	def labels
