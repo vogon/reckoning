@@ -3,12 +3,10 @@ module Labeled
 end
 
 class Expr
-	def initialize(value)
-		self.value = value
+	def initialize
 		self.children = []
 	end
 
-	attr_accessor :value
 	attr_accessor :children
 end
 
@@ -39,17 +37,19 @@ end
 class Variable < AExp
 	def initialize(name)
 		name or fail
-
-		super(name)
+		self.name = name
 	end
+
+	attr_accessor :name
 end
 
 class Numeral < AExp
 	def initialize(value)
 		value or fail
-
-		super(value)
+		self.value = value
 	end
+
+	attr_accessor :value
 end
 
 class OpA < AExp
@@ -60,28 +60,22 @@ class OpA < AExp
 		rhsexp = make_aexp(rhs)
 		(lhsexp && rhsexp) or fail
 
-		super(op.to_sym)
+		self.op = op.to_sym
 		self.children = [lhsexp, rhsexp]
 	end
+
+	attr_accessor :op
 end
 
 class True < BExp
-	def initialize
-		super(nil)
-	end
 end
 
 class False < BExp
-	def initialize
-		super(nil)
-	end
 end
 
 class Not < BExp
 	def initialize(b)
 		b.is_a? BExp or fail
-
-		super(nil)
 		self.children = [b]
 	end
 end
@@ -91,9 +85,11 @@ class OpB < BExp
 		op or fail
 		((lhs.is_a? BExp) && (rhs.is_a? BExp)) or fail
 
-		super(op.to_sym)
+		self.op = op.to_sym
 		self.children = [lhs, rhs]
 	end
+
+	attr_accessor :op
 end
 
 class OpR < BExp
@@ -104,9 +100,11 @@ class OpR < BExp
 		rhsexp = make_aexp(rhs)
 		(lhsexp && rhsexp) or fail
 
-		super(op.to_sym)
+		self.op = op.to_sym
 		self.children = [lhsexp, rhsexp]
 	end
+
+	attr_accessor :op
 end
 
 class Stmt < Expr
@@ -137,7 +135,6 @@ class Assign < Stmt
 		rhsexp = make_aexp(rhs)
 		(lhsexp && rhsexp) or fail
 
-		super(nil)
 		self.label = label
 		self.children = [lhsexp, rhsexp]
 	end
@@ -168,8 +165,6 @@ class Skip < Stmt
 	def initialize(label)
 		label or fail
 		self.label = label
-
-		super(nil)
 	end
 
 	def control_flow(pred, succ)
@@ -189,7 +184,6 @@ class Seq < Stmt
 	def initialize(s1, s2)
 		((s1.is_a? Stmt) && (s2.is_a? Stmt)) or fail
 
-		super(nil)
 		self.children = [s1, s2]
 	end
 
@@ -225,8 +219,6 @@ class If < Stmt
 		((cond.is_a? BExp) && (yes.is_a? Stmt) && (no.is_a? Stmt)) or fail
 
 		self.label = label
-
-		super(nil)
 		self.children = [cond, yes, no]
 	end
 
@@ -257,8 +249,6 @@ class While < Stmt
 		((cond.is_a? BExp) && (body.is_a? Stmt)) or fail
 
 		self.label = label
-
-		super(nil)
 		self.children = [cond, body]
 	end
 
