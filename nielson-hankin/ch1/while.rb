@@ -46,6 +46,18 @@ class Stmt < Node
 	def leaves
 		[]
 	end
+
+	def labels
+		[]
+	end
+
+	def [](label)
+		nil
+	end
+
+	def RD_exit(entry)
+		entry
+	end
 end
 
 class Variable < AExp
@@ -144,6 +156,21 @@ class Assign < Stmt
 	def leaves
 		[label]
 	end
+
+	def labels
+		[label]
+	end
+
+	def [](label)
+		(label == self.label) ? self : nil
+	end
+
+	def RD_exit(entry)
+		exit = entry.clone
+		exit[self.children[0].value] = [label]
+
+		exit
+	end
 end
 
 class Skip < Stmt
@@ -163,6 +190,14 @@ class Skip < Stmt
 
 	def leaves
 		[label]
+	end
+
+	def labels
+		[label]
+	end
+
+	def [](label)
+		(label == self.label) ? self : nil
 	end
 end
 
@@ -196,6 +231,14 @@ class Seq < Stmt
 	def leaves
 		self.children[1].leaves
 	end
+
+	def labels
+		self.children[0].labels + self.children[1].labels
+	end
+
+	def [](label)
+		(self.children[0])[label] or (self.children[1])[label]
+	end
 end
 
 class If < Stmt
@@ -224,6 +267,14 @@ class If < Stmt
 	def leaves
 		self.children[1].leaves + self.children[2].leaves
 	end
+
+	def labels
+		self.label + self.children[1].labels + self.children[2].labels
+	end
+
+	def [](label)
+		((label == self.label) ? self : nil) or (self.children[1])[label] or (self.children[2])[label]
+	end
 end
 
 class While < Stmt
@@ -249,6 +300,14 @@ class While < Stmt
 
 	def leaves
 		[self.label]
+	end
+
+	def labels
+		[self.label] + self.children[1].labels
+	end
+
+	def [](label)
+		((label == self.label) ? self : nil) or (self.children[1])[label]
 	end
 end
 
