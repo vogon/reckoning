@@ -157,6 +157,10 @@ class Stmt < Expr
 	def flow
 		[]
 	end
+
+	def flowR
+		self.flow.map { |flow| [flow[1], flow[0]] }
+	end
 end
 
 class Assign < Stmt
@@ -348,4 +352,13 @@ Folder = program([
 	Assign.new(:x, 10, 1),
 	Assign.new(:y, OpA.new(:+, :x, 10), 2),
 	Assign.new(:z, OpA.new(:+, :y, 10), 3)
+])
+
+Power = program([
+	Assign.new(:z, 1, 1),
+	While.new(OpR.new(:>, :x, 0), 2,
+				Seq.new(
+				 Assign.new(:z, OpA.new(:*, :z, :y), 3),
+				 Assign.new(:x, OpA.new(:-, :x, 1), 4)
+				))
 ])
