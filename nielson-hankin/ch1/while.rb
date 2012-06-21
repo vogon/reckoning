@@ -1,4 +1,4 @@
-module Labeled
+module Block
 	attr_accessor :label
 end
 
@@ -138,21 +138,21 @@ class Stmt < Expr
 		[]
 	end
 
-	def labels
+	def blocks
 		[]
 	end
 
-	def [](label)
-		nil
+	def labels
+		self.blocks.map { |block| block.label }
 	end
 
-	def RD_exit(entry)
-		entry
+	def [](label)
+		self.blocks.detect { |block| block.label == label }
 	end
 end
 
 class Assign < Stmt
-	include Labeled
+	include Block
 
 	def initialize(lhs, rhs, label)
 		label or fail
@@ -170,19 +170,8 @@ class Assign < Stmt
 		[[pred, label], [label, succ]]
 	end
 
-	def [](label)
-		(label == self.label) ? self : nil
-	end
-
-	def labels
-		[label]
-	end
-
-	def RD_exit(entry)
-		exit = entry.clone
-		exit[self.lhs.name] = [label]
-
-		exit
+	def blocks
+		[self]
 	end
 
 	def variables
@@ -193,7 +182,7 @@ class Assign < Stmt
 end
 
 class Skip < Stmt
-	include Labeled
+	include Block
 
 	def initialize(label)
 		label or fail
@@ -204,12 +193,8 @@ class Skip < Stmt
 		[[pred, label], [label, succ]]
 	end
 
-	def labels
-		[self.label]
-	end
-
-	def [](label)
-		(label == self.label) ? self : nil
+	def blocks
+		[self]
 	end
 
 	def entry
@@ -247,12 +232,8 @@ class Seq < Stmt
 		s1_inside + s2_inside + control_transfers
 	end
 
-	def labels
-		self.first.labels + self.second.labels
-	end
-
-	def [](label)
-		self.first[label] or self.second[label]
+	def blocks
+		self.first.blocks + self.second.blocks
 	end
 
 	def variables
@@ -263,7 +244,7 @@ class Seq < Stmt
 end
 
 class If < Stmt
-	include Labeled
+	include Block
 
 	def initialize(cond, label, yes, no)
 		label or fail
@@ -282,12 +263,8 @@ class If < Stmt
 		yes_flows + no_flows
 	end
 
-	def labels
-		self.label + self.yes.labels + self.no.labels
-	end
-
-	def [](label)
-		((label == self.label) ? self : nil) or (self.yes)[label] or (self.no)[label]
+	def blocks
+		[self] + self.yes.blocks + self.no.blocks
 	end
 
 	def variables
@@ -299,7 +276,7 @@ class If < Stmt
 end
 
 class While < Stmt
-	include Labeled
+	include Block
 
 	def initialize(cond, label, body)
 		label or fail
@@ -318,12 +295,8 @@ class While < Stmt
 		entry_flows + exit_flows + body_flows
 	end
 
-	def labels
-		[self.label] + self.body.labels
-	end
-
-	def [](label)
-		((label == self.label) ? self : nil) or (self.body)[label]
+	def blocks
+		[self] + self.body.blocks
 	end
 
 	def variables
@@ -353,4 +326,10 @@ Factorial = program([
 			   	Assign.new(:y, OpA.new(:-, :y, 1), 5)
 			   )),
 	Assign.new(:y, 0, 6)
+])
+
+Folder = program([
+	Assign.new(:x, 10, 1),
+	Assign.new(:y, OpA.new(:+, :x, 10), 2),
+	Assign.new(:z, OpA.new(:+, :y, 10), 3)
 ])

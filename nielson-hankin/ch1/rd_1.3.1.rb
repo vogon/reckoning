@@ -1,3 +1,20 @@
+require './while'
+
+class Stmt < Expr
+    def RD_exit(entry)
+        entry
+    end
+end
+
+class Assign < Stmt
+    def RD_exit(entry)
+        exit = entry.clone
+        exit[self.lhs.name] = [label]
+
+        exit
+    end
+end
+
 def RD_init(program)
     rd = {:program => program,
           :control_flow => program.control_flow(nil, nil),
@@ -58,5 +75,5 @@ def solve(program)
         # puts "rd_rec after enter: #{rdr}"
     end
 
-    rdr
+    rdr[:entry]
 end
