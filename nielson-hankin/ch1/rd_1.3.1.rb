@@ -17,7 +17,7 @@ end
 
 def RD_init(program)
     rd = {:program => program,
-          :control_flow => program.control_flow(nil, nil),
+          :control_flow => program.flow,
           :entry => Hash[program.labels.map {|label| [label, Hash[program.variables.map {|var| [var, []]}]]}],
           :exit => Hash[program.labels.map {|label| [label, Hash[program.variables.map {|var| [var, []]}]]}]}
 
@@ -34,16 +34,7 @@ def RD_enter(rd_rec, label)
     flows_in.each do |flow|
         # identify label departing
         from_label = flow[0]
-
-        if from_label.nil? then
-            # special case: if the program can begin here, add nil ("this 
-            # variable is uninitialized at this point") to the result for
-            # each variable
-            rd_exit = Hash[program.variables.map {|var| [var, [nil]]}]
-        else
-            # grab RD_exit for that label
-            rd_exit = rd_rec[:exit][from_label]
-        end
+        rd_exit = rd_rec[:exit][from_label]
 
         # puts "rd_exit from #{from_label}: #{rd_exit}"
 

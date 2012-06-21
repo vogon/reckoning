@@ -134,10 +134,6 @@ class OpR < BExp
 end
 
 class Stmt < Expr
-	def control_flow(pred, succ)
-		[]
-	end
-
 	def blocks
 		[]
 	end
@@ -148,6 +144,18 @@ class Stmt < Expr
 
 	def [](label)
 		self.blocks.detect { |block| block.label == label }
+	end
+
+	def init
+		nil
+	end
+
+	def final
+		nil
+	end
+
+	def flow
+		[]
 	end
 end
 
@@ -166,16 +174,20 @@ class Assign < Stmt
 		self.rhs = rhsexp
 	end
 
-	def control_flow(pred, succ)
-		[[pred, label], [label, succ]]
-	end
-
 	def blocks
 		[self]
 	end
 
 	def variables
 		self.lhs.variables | self.rhs.variables
+	end
+
+	def init
+		self.label
+	end
+
+	def final
+		[self.label]
 	end
 
 	attr_accessor :lhs, :rhs
@@ -189,16 +201,16 @@ class Skip < Stmt
 		self.label = label
 	end
 
-	def control_flow(pred, succ)
-		[[pred, label], [label, succ]]
-	end
-
 	def blocks
 		[self]
 	end
 
-	def entry
+	def init
 		self.label
+	end
+
+	def final
+		[self.label]
 	end
 end
 
@@ -210,34 +222,26 @@ class Seq < Stmt
 		self.second = s2
 	end
 
-	def control_flow(pred, succ)
-		s1 = self.first
-		s2 = self.second
-
-		# build the control flow graphs for the individual statements first
-		# (we don't know where the control transfers are yet)
-		s1_flows = s1.control_flow(pred, nil)
-		s2_flows = s2.control_flow(nil, succ)
-
-		# identify the labels where control leaves S1
-		s1_leaves, s1_inside = s1_flows.partition {|flow| flow[1] == nil}
-		s1_leaves_labels = s1_leaves.map {|flow| flow[0]}
-		# and the labels where control enters S2
-		s2_enters, s2_inside = s2_flows.partition {|flow| flow[0] == nil}
-		s2_enters_labels = s2_enters.map {|flow| flow[1]}
-
-		# build control flows from each S1 exit to each S2 entrance
-		control_transfers = s1_leaves_labels.product(s2_enters_labels)
-
-		s1_inside + s2_inside + control_transfers
-	end
-
 	def blocks
 		self.first.blocks + self.second.blocks
 	end
 
 	def variables
 		self.first.variables | self.second.variables
+	end
+
+	def init
+		self.first.init
+	end
+
+	def final
+		self.second.final
+	end
+
+	def flow
+		control_transfers = self.first.final.map { |flabel| [flabel, self.second.init] }
+
+		self.first.flow | self.second.flow | control_transfers
 	end
 
 	attr_accessor :first, :second
@@ -256,19 +260,24 @@ class If < Stmt
 		self.no = no
 	end
 
-	def control_flow(pred, succ)
-		yes_flows = self.yes.control_flow(label, succ)
-		no_flows = self.no.control_flow(label, succ)
-
-		yes_flows + no_flows
-	end
-
 	def blocks
 		[self] + self.yes.blocks + self.no.blocks
 	end
 
 	def variables
 		self.test.variables | self.yes.variables | self.no.variables
+	end
+
+	def init
+		self.label
+	end
+
+	def final
+		self.yes.final | self.no.final
+	end
+
+	def flow
+		self.yes.flow | self.no.flow | [[self.label, self.yes.init], [self.label, self.no.init]]
 	end
 
 	attr_accessor :test
@@ -287,20 +296,27 @@ class While < Stmt
 		self.body = body
 	end
 
-	def control_flow(pred, succ)
-		entry_flows = [[pred, label]]
-		exit_flows = [[label, succ]]
-		body_flows = self.body.control_flow(label, label)
-
-		entry_flows + exit_flows + body_flows
-	end
-
 	def blocks
 		[self] + self.body.blocks
 	end
 
 	def variables
 		self.test.variables | self.body.variables
+	end
+
+	def init
+		self.label
+	end
+
+	def final
+		[self.label]
+	end
+
+	def flow
+		test_passed_flow = [[self.label, self.body.init]]
+		loop_flows = self.body.final.map { |flabel| [flabel, self.label] }
+
+		self.body.flow | test_passed_flow | loop_flows
 	end
 
 	attr_accessor :test
