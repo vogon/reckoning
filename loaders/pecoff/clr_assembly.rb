@@ -1,6 +1,20 @@
 require './exe'
 require './helpers'
 
+def popcount(n)
+    count = 0
+
+    while n > 0 do
+        if (n & 1) != 0 then
+            count = count + 1
+        end
+
+        n = n >> 1
+    end
+
+    count
+end
+
 module CLR
 
 class CLIHeader
@@ -140,6 +154,13 @@ class SquiggleStream
         stream.reserved_7 = f.read_byte
         stream.valid = TableVector.new(f.read_qword)
         stream.sorted = TableVector.new(f.read_qword)
+
+        stream.rows = []
+        popcount(stream.valid.to_i).times do |i|
+            stream.rows[i] = f.read_dword
+        end
+
+        puts "module table starts #{f.read_word.to_s(16)}, #{f.read_word}, #{f.read_word}, #{f.read_word}, #{f.read_word}"
 
         return stream
     end
