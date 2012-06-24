@@ -225,7 +225,7 @@ class MetadataRoot
         root = MetadataRoot.new
 
         signature = f.read_dword
-        signature == 0x424A5342 or raise "invalid metadata signature"
+        raise "invalid metadata signature" if signature != 0x424A5342
 
         root.major_version = f.read_word
         root.minor_version = f.read_word
