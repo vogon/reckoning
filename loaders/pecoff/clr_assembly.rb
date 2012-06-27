@@ -81,24 +81,24 @@ end
 
 class StringsHeap
     def StringsHeap.read(f, len)
-        heap = StringsHeap.new
-
         # read whole heap at once
         data = f.read(len)
 
         # data now contains "ASCII-8BIT" string data.  it's really 
-        # NUL-terminated UTF-8. so convert it and then split on \0.
+        # NUL-terminated UTF-8. so convert it now.
         data.force_encoding(Encoding::UTF_8)
-        heap.strings = data.split("\0")
 
-        heap
+        StringsHeap.new(data)
     end
 
-    def initialize
-        self.strings = []
+    def initialize(data)
+        @data = data
     end
 
-    attr_accessor :strings
+    def [](index)
+        # read until the next \0.
+        @data[index...@data.index("\0", index)]
+    end
 end
 
 class SquiggleStream
@@ -143,6 +143,12 @@ class SquiggleStream
         enum_attr :generic_param_constraint,(1 << 0x2c)
     end
 
+    class HeapSizes < Flags
+        enum_attr :big_string_heap,     0x01
+        enum_attr :big_guid_heap,       0x02
+        enum_attr :big_blob_heap,       0x04
+    end
+
     def SquiggleStream.read(f, len)
         f.extend BinaryIO
         stream = SquiggleStream.new
@@ -150,7 +156,7 @@ class SquiggleStream
         stream.reserved_0 = f.read_dword
         stream.major_version = f.read_byte
         stream.minor_version = f.read_byte
-        stream.heap_sizes = f.read_byte
+        stream.heap_sizes = HeapSizes.new(f.read_byte)
         stream.reserved_7 = f.read_byte
         stream.valid = TableVector.new(f.read_qword)
         stream.sorted = TableVector.new(f.read_qword)
@@ -160,7 +166,7 @@ class SquiggleStream
             stream.rows[i] = f.read_dword
         end
 
-        puts "module table starts #{f.read_word.to_s(16)}, #{f.read_word}, #{f.read_word}, #{f.read_word}, #{f.read_word}"
+        # puts "module table starts #{f.read_word.to_s(16)}, #{f.read_word}, #{f.read_word}, #{f.read_word}, #{f.read_word}"
 
         return stream
     end

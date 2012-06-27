@@ -23,14 +23,38 @@ class MDRow
             puts @schema
         end
 
-        def read(f)
+        def read(f, index, heap_sizes)
             f.extend BinaryIO
+            row = self.new(index)
+            value = nil
 
             @schema.each do |column|
-                
+                case column[:type]
+                when :uint16 then
+                    value = f.read_word
+                when :uint32 then
+                    value = f.read_dword
+                when :string_index then
+                    value = heap_sizes.big_string_heap? ? f.read_dword : f.read_word
+                when :blob_index then
+                    value = heap_sizes.big_blob_heap? ? f.read_dword : f.read_word
+                when :guid_index then
+                    value = heap_sizes.big_guid_heap? ? f.read_dword : f.read_word
+                else
+                    puts "doot"
+                end
+
+                row.send (column[:name].to_s + "="), value
             end
+
+            row
         end
 
+        def [](index)
+            (self.table_id << 24) | index
+        end
+
+        private
         def table_id
             # puts "table_id"
 
@@ -43,39 +67,40 @@ class MDRow
             @table_id = id
         end
 
-        def [](index)
-            (self.table_id << 24) | index
-        end
-
         def word(name)
             @schema << { :name => name, :type => :uint16 }
+            attr_accessor name
         end
 
         def dword(name)
             @schema << { :name => name, :type => :uint32 }
+            attr_accessor name
         end
 
         def string_index(name)
             @schema << { :name => name, :type => :string_index }
+            attr_accessor name
         end
 
         def blob_index(name)
             @schema << { :name => name, :type => :blob_index }
+            attr_accessor name
         end
 
         def guid_index(name)
             @schema << { :name => name, :type => :guid_index }
+            attr_accessor name
         end
 
         def md_index(table, name)
             @schema << { :name => name, :type => :md_index, :tables => [table], :mapping => Proc.new { |index| make_token(table, index) } }
+            attr_accessor name
         end
 
         def md_codedindex(tables, tag_width, name)
             @schema << { :name => name, :type => :md_index, :tables => tables, :mapping => Proc.new { |index| make_codedindex_token(tables, tag_width, index) } }
+            attr_accessor name
         end
-
-        private
 
         def inherited(descendant)
             descendant.instance_eval do
@@ -116,6 +141,12 @@ class MDTypeRef < MDRow
     string_index :type_namespace
 end
 
+class MDModuleRef < MDRow
+    self.table_id = 0x1A
+
+    string_index :name
+end
+
 class MDAssembly < MDRow
     self.table_id = 0x20
 
@@ -128,6 +159,20 @@ class MDAssembly < MDRow
     blob_index :public_key
     string_index :name
     string_index :culture
+end
+
+class MDAssemblyRef < MDRow
+    self.table_id = 0x23
+
+    word :major_version
+    word :minor_version
+    word :build_number
+    word :revision_number
+    dword :flags
+    blob_index :public_key_or_token
+    string_index :name
+    string_index :culture
+    blob_index :hash_value
 end
 
 end
