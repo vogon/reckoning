@@ -5,6 +5,16 @@ class Flags
             @flags
         end
 
+        def to_sym(f)
+            if f.is_a? Flags then
+                f = f.to_i
+            end
+
+            flag = @flags.select { |flag, val| val == f }
+
+            (nil if !flag) or flag.keys[0]
+        end
+
         private
         def inherited(descendant)
             descendant.instance_eval do
@@ -44,5 +54,9 @@ class Flags
 
     def to_i
         @attrs
+    end
+
+    def to_sym
+        self.class.to_sym(self)
     end
 end

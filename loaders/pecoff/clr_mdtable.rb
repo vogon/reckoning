@@ -3,16 +3,18 @@ require './helpers'
 module CLR
 
 def self.make_token(table_sym, index)
-    table = const_get(table_sym)
+    table = CLR::Tables.const_get(table_sym)
     table[index]
 end
 
-def self.make_codedindex_token(table_syms, tag_width, codedindex)
-    tag_mask = (1 << tag_width) - 1
-    tag = codedindex & tag_mask
-    index = codedindex >> tag_width
+def self.make_codedindex_token(table_syms, size, tag_width, codedindex)
+    # puts "m_ci_t(#{table_syms}, #{size}, #{tag_width}, #{codedindex})"
+    index_mask = (1 << (size - tag_width + 1)) - 1
+    index = codedindex & index_mask
+    tag = codedindex >> (size - tag_width)
 
-    table = const_get(table_syms[tag])
+    table_syms[tag] or raise "couldn't figure out table: coded index is #{codedindex.to_s(2)}, tag is #{tag}, tables are #{table_syms}"
+    table = CLR::Tables.const_get(table_syms[tag])
     table[index]
 end
 
@@ -21,6 +23,22 @@ class MDRow
     class << self
         def dump
             puts @schema
+        end
+
+        # read 4 bytes if block is true; otherwise, read 2 bytes
+        def read_index(f)
+            if yield then
+                f.read_dword
+            else
+                f.read_word
+            end
+        end
+
+        def read_size(f, sz)
+            case sz
+            when 16 then f.read_word
+            when 32 then f.read_dword
+            end
         end
 
         def read(f, index, heap_sizes)
@@ -35,14 +53,18 @@ class MDRow
                 when :uint32 then
                     value = f.read_dword
                 when :string_index then
-                    value = heap_sizes.big_string_heap? ? f.read_dword : f.read_word
+                    value = read_index(f) { heap_sizes.big_string_heap? }
                 when :blob_index then
-                    value = heap_sizes.big_blob_heap? ? f.read_dword : f.read_word
+                    value = read_index(f) { heap_sizes.big_blob_heap? }
                 when :guid_index then
-                    value = heap_sizes.big_guid_heap? ? f.read_dword : f.read_word
-                else
-                    puts "doot"
+                    value = read_index(f) { heap_sizes.big_guid_heap? }
+                when :md_index then
+                    size = (column[:size]).call(f)
+                    rawvalue = read_size(f, size)
+                    value = (column[:mapper]).call(rawvalue, size)
                 end
+
+                # puts "#{column[:name]}: type #{column[:type]}, value #{value.to_s(16)}"
 
                 row.send (column[:name].to_s + "="), value
             end
@@ -54,13 +76,13 @@ class MDRow
             (self.table_id << 24) | index
         end
 
-        private
         def table_id
             # puts "table_id"
 
             @table_id
         end
 
+        private
         def table_id=(id)
             # puts "table_id = #{id}"
 
@@ -93,12 +115,18 @@ class MDRow
         end
 
         def md_index(table, name)
-            @schema << { :name => name, :type => :md_index, :tables => [table], :mapping => Proc.new { |index| make_token(table, index) } }
+            size = Proc.new { |f| 16 }
+            mapper = Proc.new { |index, size| CLR::make_token(table, index) }
+
+            @schema << { :name => name, :type => :md_index, :size => size, :mapper => mapper }
             attr_accessor name
         end
 
         def md_codedindex(tables, tag_width, name)
-            @schema << { :name => name, :type => :md_index, :tables => tables, :mapping => Proc.new { |index| make_codedindex_token(tables, tag_width, index) } }
+            size = Proc.new { |f| 16 }
+            mapper = Proc.new { |index, size| CLR::make_codedindex_token(tables, size, tag_width, index) }
+
+            @schema << { :name => name, :type => :md_index, :size => size, :mapper => mapper }
             attr_accessor name
         end
 
@@ -119,6 +147,8 @@ class MDRow
 
     attr_accessor :index
 end
+
+module Tables
 
 ObjectSpace.each_object(MDRow.singleton_class).each do |klass|
     remove_const klass.name.gsub(/^.*::/, '') if klass < MDRow
@@ -141,10 +171,69 @@ class MDTypeRef < MDRow
     string_index :type_namespace
 end
 
+class MDTypeDef < MDRow
+    self.table_id = 0x02
+
+    dword :flags
+    string_index :type_name
+    string_index :type_namespace
+    md_codedindex [:MDTypeRef, :MDTypeDef, :MDTypeSpec], 2, :extends
+    md_index :MDField, :field_list
+    md_index :MDMethodDef, :method_list
+end
+
+class MDField < MDRow
+    self.table_id = 0x04
+
+    word :flags
+    string_index :name
+    blob_index :signature
+end
+
+class MDMethodDef < MDRow
+    self.table_id = 0x06
+
+    dword :rva
+    word :impl_flags
+    word :flags
+    string_index :name
+    blob_index :signature
+    md_index :MDParam, :param_list
+end
+
+class MDParam < MDRow
+    self.table_id = 0x08
+
+    word :flags
+    word :sequence
+    string_index :name
+end
+
+class MDInterfaceImpl < MDRow
+    self.table_id = 0x09
+
+    md_index :MDTypeDef, :klass
+    md_codedindex [:MDTypeRef, :MDTypeDef, :MDTypeSpec], 2, :interface
+end
+
+class MDMemberRef < MDRow
+    self.table_id = 0x0A
+
+    md_codedindex [:MDTypeDef, :MDTypeRef, :MDModuleRef, :MDMethodDef, :MDTypeSpec], 3, :klass
+    string_index :name
+    blob_index :signature
+end
+
 class MDModuleRef < MDRow
     self.table_id = 0x1A
 
     string_index :name
+end
+
+class MDTypeSpec < MDRow
+    self.table_id = 0x1B
+
+    blob_index :signature
 end
 
 class MDAssembly < MDRow
@@ -175,4 +264,6 @@ class MDAssemblyRef < MDRow
     blob_index :hash_value
 end
 
-end
+end # module Tables
+
+end # module CLR

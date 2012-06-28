@@ -101,54 +101,16 @@ class StringsHeap
     end
 end
 
-class SquiggleStream
-    class TableVector < Flags
-        enum_attr :module,                  (1 << 0x00)
-        enum_attr :type_ref,                (1 << 0x01)
-        enum_attr :type_def,                (1 << 0x02)
-        enum_attr :field,                   (1 << 0x04)
-        enum_attr :method_def,              (1 << 0x06)
-        enum_attr :param,                   (1 << 0x08)
-        enum_attr :interface_impl,          (1 << 0x09)
-        enum_attr :member_ref,              (1 << 0x0a)
-        enum_attr :constant,                (1 << 0x0b)
-        enum_attr :custom_attribute,        (1 << 0x0c)
-        enum_attr :field_marshal,           (1 << 0x0d)
-        enum_attr :decl_security,           (1 << 0x0e)
-        enum_attr :class_layout,            (1 << 0x0f)
-        enum_attr :field_layout,            (1 << 0x10)
-        enum_attr :stand_alone_sig,         (1 << 0x11)
-        enum_attr :event_map,               (1 << 0x12)
-        enum_attr :event,                   (1 << 0x14)
-        enum_attr :property_map,            (1 << 0x15)
-        enum_attr :property,                (1 << 0x17)
-        enum_attr :method_semantics,        (1 << 0x18)
-        enum_attr :method_impl,             (1 << 0x19)
-        enum_attr :module_ref,              (1 << 0x1a)
-        enum_attr :type_spec,               (1 << 0x1b)
-        enum_attr :impl_map,                (1 << 0x1c)
-        enum_attr :field_rva,               (1 << 0x1d)
-        enum_attr :assembly,                (1 << 0x20)
-        enum_attr :assembly_processor,      (1 << 0x21)
-        enum_attr :assembly_os,             (1 << 0x22)
-        enum_attr :assembly_ref,            (1 << 0x23)
-        enum_attr :assembly_ref_processor,  (1 << 0x24)
-        enum_attr :assembly_ref_os,         (1 << 0x25)
-        enum_attr :file,                    (1 << 0x26)
-        enum_attr :exported_type,           (1 << 0x27)
-        enum_attr :manifest_resource,       (1 << 0x28)
-        enum_attr :nested_class,            (1 << 0x29)
-        enum_attr :generic_param,           (1 << 0x2a)
-        enum_attr :method_spec,             (1 << 0x2b)
-        enum_attr :generic_param_constraint,(1 << 0x2c)
-    end
+require './clr_mdtable'
 
+class SquiggleStream
     class HeapSizes < Flags
         enum_attr :big_string_heap,     0x01
         enum_attr :big_guid_heap,       0x02
         enum_attr :big_blob_heap,       0x04
     end
 
+    public
     def SquiggleStream.read(f, len)
         f.extend BinaryIO
         stream = SquiggleStream.new
@@ -158,12 +120,44 @@ class SquiggleStream
         stream.minor_version = f.read_byte
         stream.heap_sizes = HeapSizes.new(f.read_byte)
         stream.reserved_7 = f.read_byte
-        stream.valid = TableVector.new(f.read_qword)
-        stream.sorted = TableVector.new(f.read_qword)
+        stream.valid = f.read_qword
+        stream.sorted = f.read_qword
 
         stream.rows = []
         popcount(stream.valid.to_i).times do |i|
             stream.rows[i] = f.read_dword
+        end
+
+        # grab a list of all the classes which are metadata types, sorted by their table id
+        tables_classes = CLR::Tables.constants.
+                            map { |const| CLR::Tables.const_get(const) }.
+                            select { |klass| klass < CLR::MDRow }.
+                            sort { |a, b| a.table_id <=> b.table_id }
+
+        # stream.rows is indexed by the offset of the table into the file, not the actual table id.
+        # we need to maintain a count as we read the metadata.
+        table_count = 0
+
+        (0..63).each do |i|
+            if (stream.valid & (1 << i)) != 0 then
+                # bit i is valid; check to see if we have a class for reading it.
+                puts "table #{i} present."
+                raise "don't know how to parse valid table #{i}!" if tables_classes[0].table_id != i
+
+                rows = stream.rows[table_count]
+
+                # read a bunch of rows (note: row indices start at 1)
+                puts "reading #{rows} rows from table #{i}..."
+                (1..rows).each do |row_index|
+                    row = tables_classes[0].read(f, row_index, stream.heap_sizes)
+                end
+
+                # move on to the next table
+                table_count += 1
+                tables_classes.slice!(0)
+            else
+                puts "table #{i} not present."
+            end
         end
 
         # puts "module table starts #{f.read_word.to_s(16)}, #{f.read_word}, #{f.read_word}, #{f.read_word}, #{f.read_word}"
