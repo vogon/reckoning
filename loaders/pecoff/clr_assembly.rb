@@ -128,33 +128,59 @@ class SquiggleStream
             stream.rows[i] = f.read_dword
         end
 
-        # grab a list of all the classes which are metadata types, sorted by their table id
+        # grab a list of all the classes which are metadata types, sorted by 
+        # their table id
         tables_classes = CLR::Tables.constants.
                             map { |const| CLR::Tables.const_get(const) }.
-                            select { |klass| klass < CLR::MDRow }.
+                            select { |klass| (klass.is_a? Class) && (klass < CLR::MDRow) }.
                             sort { |a, b| a.table_id <=> b.table_id }
 
-        # stream.rows is indexed by the offset of the table into the file, not the actual table id.
-        # we need to maintain a count as we read the metadata.
+        # collect the sizes of the heaps and the metadata tables.
         table_count = 0
+
+        # the sizes of the heaps don't matter as long as we know whether 
+        # indices are 16- or 32-bit.
+        sizes = { :string => (stream.heap_sizes.big_string_heap? ? 65536 : 1), 
+                  :guid => (stream.heap_sizes.big_guid_heap? ? 65536 : 1),
+                  :blob => (stream.heap_sizes.big_blob_heap? ? 65536 : 1) }
+
+        (0..63).each do |i|
+            if (stream.valid & (1 << i)) != 0 then
+                # table is present; map its size.
+                table_class = tables_classes.detect { |klass| klass.table_id == i }
+                raise "don't know what valid table #{i} is!" if not table_class
+
+                rows = stream.rows[table_count]
+                sizes[table_class.name.gsub(/^.*::/, '')] = rows
+                table_count += 1
+            end
+        end
+
+        puts sizes.inspect
+
+        # read the metadata tables.
+        table_count = 0
+        stream.tables = {}
 
         (0..63).each do |i|
             if (stream.valid & (1 << i)) != 0 then
                 # bit i is valid; check to see if we have a class for reading it.
                 puts "table #{i} present."
-                raise "don't know how to parse valid table #{i}!" if tables_classes[0].table_id != i
+
+                table_class = tables_classes.detect { |klass| klass.table_id == i }
+                raise "don't know how to parse valid table #{i}!" if not table_class
 
                 rows = stream.rows[table_count]
 
                 # read a bunch of rows (note: row indices start at 1)
                 puts "reading #{rows} rows from table #{i}..."
                 (1..rows).each do |row_index|
-                    row = tables_classes[0].read(f, row_index, stream.heap_sizes)
+                    row = table_class.read(f, row_index, stream.heap_sizes)
+                    stream.tables[row.token] = row
                 end
 
                 # move on to the next table
                 table_count += 1
-                tables_classes.slice!(0)
             else
                 puts "table #{i} not present."
             end

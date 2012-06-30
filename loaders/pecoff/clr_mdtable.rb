@@ -48,6 +48,8 @@ class MDRow
 
             @schema.each do |column|
                 case column[:type]
+                when :uint8 then
+                    value = f.read_byte
                 when :uint16 then
                     value = f.read_word
                 when :uint32 then
@@ -66,7 +68,7 @@ class MDRow
 
                 # puts "#{column[:name]}: type #{column[:type]}, value #{value.to_s(16)}"
 
-                row.send (column[:name].to_s + "="), value
+                row.send "#{column[:name].to_s}=", value
             end
 
             row
@@ -87,6 +89,11 @@ class MDRow
             # puts "table_id = #{id}"
 
             @table_id = id
+        end
+
+        def byte(name)
+            @schema << { :name => name, :type => :uint8 }
+            attr_accessor name
         end
 
         def word(name)
@@ -115,6 +122,7 @@ class MDRow
         end
 
         def md_index(table, name)
+            # fixme
             size = Proc.new { |f| 16 }
             mapper = Proc.new { |index, size| CLR::make_token(table, index) }
 
@@ -122,8 +130,11 @@ class MDRow
             attr_accessor name
         end
 
-        def md_codedindex(tables, tag_width, name)
+        def md_codedindex(tables, name)
+            # fixme
             size = Proc.new { |f| 16 }
+            tag_width = Math.log(tables.length, 2).ceil
+
             mapper = Proc.new { |index, size| CLR::make_codedindex_token(tables, size, tag_width, index) }
 
             @schema << { :name => name, :type => :md_index, :size => size, :mapper => mapper }
@@ -154,6 +165,23 @@ ObjectSpace.each_object(MDRow.singleton_class).each do |klass|
     remove_const klass.name.gsub(/^.*::/, '') if klass < MDRow
 end
 
+TypeDefOrRef = [:MDTypeDef, :MDTypeRef, :MDTypeSpec]
+HasConstant = [:MDField, :MDParam, :MDProperty]
+HasCustomAttribute = [:MDMethodDef, :MDField, :MDTypeRef, :MDTypeDef, :MDParam, :MDInterfaceImpl, :MDMemberRef,
+        :MDModule, :MDPermission, :MDProperty, :MDEvent, :MDStandAloneSig, :MDModuleRef, :MDTypeSpec, :MDAssembly,
+        :MDAssemblyRef, :MDFile, :MDExportedType, :MDManifestResource, :MDGenericParam, :MDGenericParamConstant,
+        :MDMethodSpec]
+HasFieldMarshal = [:MDField, :MDParam]
+HasDeclSecurity = [:MDTypeDef, :MDMethodDef, :MDAssembly]
+MemberRefParent = [:MDTypeDef, :MDTypeRef, :MDModuleRef, :MDModuleDef, :MDTypeSpec]
+HasSemantics = [:MDEvent, :MDProperty]
+MethodDefOrRef = [:MDMethodDef, :MDMemberRef]
+MemberForwarded = [:MDField, :MDMethodDef]
+Implementation = [:MDFile, :MDAssemblyRef, :MDExportedType]
+CustomAttributeType = [nil, nil, :MDMethodDef, :MDMemberRef, nil]
+ResolutionScope = [:MDModule, :MDModuleRef, :MDAssemblyRef, :MDTypeRef]
+TypeOrMethodDef = [:MDTypeDef, :MDMethodDef]
+
 class MDModule < MDRow
     self.table_id = 0x00
 
@@ -166,7 +194,7 @@ end
 class MDTypeRef < MDRow
     self.table_id = 0x01
 
-    md_codedindex [:MDModule, :MDModuleRef, :MDAssemblyRef, :MDTypeRef], 2, :resolution_scope
+    md_codedindex ResolutionScope, :resolution_scope
     string_index :type_name
     string_index :type_namespace
 end
@@ -177,7 +205,7 @@ class MDTypeDef < MDRow
     dword :flags
     string_index :type_name
     string_index :type_namespace
-    md_codedindex [:MDTypeRef, :MDTypeDef, :MDTypeSpec], 2, :extends
+    md_codedindex TypeDefOrRef, :extends
     md_index :MDField, :field_list
     md_index :MDMethodDef, :method_list
 end
@@ -213,15 +241,99 @@ class MDInterfaceImpl < MDRow
     self.table_id = 0x09
 
     md_index :MDTypeDef, :klass
-    md_codedindex [:MDTypeRef, :MDTypeDef, :MDTypeSpec], 2, :interface
+    md_codedindex TypeDefOrRef, :interface
 end
 
 class MDMemberRef < MDRow
     self.table_id = 0x0A
 
-    md_codedindex [:MDTypeDef, :MDTypeRef, :MDModuleRef, :MDMethodDef, :MDTypeSpec], 3, :klass
+    md_codedindex MemberRefParent, :klass
     string_index :name
     blob_index :signature
+end
+
+class MDConstant < MDRow
+    self.table_id = 0x0B
+
+    byte :type
+    byte :reserved_1
+    md_codedindex HasConstant, :parent
+    blob_index :value
+end
+
+class MDCustomAttribute < MDRow
+    self.table_id = 0x0C
+
+    md_codedindex HasCustomAttribute, :parent
+    md_codedindex CustomAttributeType, :type
+    blob_index :value
+end
+
+class MDFieldMarshal < MDRow
+    self.table_id = 0x0D
+
+    md_codedindex HasFieldMarshal, :parent
+    blob_index :native_type
+end
+
+class MDDeclSecurity < MDRow
+    self.table_id = 0x0E
+
+    word :action
+    md_codedindex HasDeclSecurity, :parent
+    blob_index :permission_set
+end
+
+class MDClassLayout < MDRow
+    self.table_id = 0x0F
+
+    word :packing_size
+    dword :class_size
+    md_index :MDTypeDef, :parent
+end
+
+class MDStandAloneSig < MDRow
+    self.table_id = 0x11
+
+    blob_index :signature
+end
+
+class MDEventMap < MDRow
+    self.table_id = 0x12
+
+    md_index :MDTypeDef, :parent
+    md_index :MDEvent, :event_list
+end
+
+class MDEvent < MDRow
+    self.table_id = 0x14
+
+    word :event_flags
+    string_index :name
+    md_codedindex TypeDefOrRef, :event_type
+end
+
+class MDPropertyMap < MDRow
+    self.table_id = 0x15
+
+    md_index :MDTypeDef, :parent
+    md_index :MDProperty, :property_list
+end
+
+class MDProperty < MDRow
+    self.table_id = 0x17
+
+    word :flags
+    string_index :name
+    blob_index :type
+end
+
+class MDMethodSemantics < MDRow
+    self.table_id = 0x18
+
+    word :semantics
+    md_index :MDMethodDef, :method
+    md_codedindex HasSemantics, :association
 end
 
 class MDModuleRef < MDRow
