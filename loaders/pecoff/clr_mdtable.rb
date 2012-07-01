@@ -189,6 +189,7 @@ class MDModule < MDRow
     string_index :name
     guid_index :mvid
     guid_index :encid
+    guid_index :encbaseid
 end
 
 class MDTypeRef < MDRow
